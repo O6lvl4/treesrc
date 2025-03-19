@@ -88,4 +88,4 @@ npm start -- <directory> [options]
 
 ---
 
-Made with ❤️ by [Your Name](https://github.com/O6lvl4).
+Made with ❤️ by [O6lvl4](https://github.com/O6lvl4).
