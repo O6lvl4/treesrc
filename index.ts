@@ -4,9 +4,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import ignore, { Ignore } from 'ignore';
 import { program } from 'commander';
+import { isBinaryFileSync } from 'isbinaryfile';
 
 program
-  .version('1.0.2')
+  .version('1.0.3')
   .argument('<directory>', 'Target directory')
   .option('-i, --ignore <patterns...>', 'Extra ignore patterns')
   .parse(process.argv);
@@ -134,21 +135,35 @@ function showFilesContent(files: string[], baseDir: string) {
   files.forEach((filePath) => {
     const relativePath = path.relative(baseDir, filePath);
 
-    // バイナリファイルの場合はスキップ
-    if (isBinaryFile(filePath)) {
+    // バイナリファイルか判定（isbinaryfileライブラリ使用）
+    if (isBinaryFileSync(filePath)) {
       console.log(`\n/${relativePath}:\n${'-'.repeat(80)}`);
       console.log('Binary file not displayed.\n');
       return;
     }
 
-    // テキストファイルの場合は従来通り表示
-    const content = fs.readFileSync(filePath, 'utf8');
-    const contentLines = content
-      .split('\n')
-      .map((line, idx) => `${idx + 1} | ${line}`)
-      .join('\n');
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
+      
+      // 制御文字や非表示文字が多い場合もスキップする（追加改善）
+      const controlChars = content.match(/[\x00-\x08\x0E-\x1F\x7F-\x9F]/g);
+      if (controlChars && controlChars.length > content.length * 0.1) {
+        console.log(`\n/${relativePath}:\n${'-'.repeat(80)}`);
+        console.log('Binary-like or corrupted text file not displayed.\n');
+        return;
+      }
 
-    console.log(`\n/${relativePath}:\n${'-'.repeat(80)}\n${contentLines}\n`);
+      const contentLines = content
+        .split('\n')
+        .map((line, idx) => `${idx + 1} | ${line}`)
+        .join('\n');
+
+      console.log(`\n/${relativePath}:\n${'-'.repeat(80)}\n${contentLines}\n`);
+    } catch (error) {
+      // UTF-8で読み取れないファイルはスキップする
+      console.log(`\n/${relativePath}:\n${'-'.repeat(80)}`);
+      console.log('File encoding unreadable. Skipped.\n');
+    }
   });
 }
 

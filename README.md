@@ -73,6 +73,12 @@ npm start -- <directory> [options]
 
 ## 📝 Changelog
 
+### v1.0.3
+
+- **Added support for custom ignore patterns**  
+  You can now specify additional ignore patterns via CLI arguments.  
+  Example: `treesrc ./my-project -i '*.log' '*.tmp'`
+
 ### v1.0.2
 
 - **Added binary file detection**  
