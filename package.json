@@ -1,6 +1,6 @@
 {
   "name": "treesrc",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A CLI tool written in TypeScript to display directory structure and file contents, respecting .gitignore rules.",
   "main": "dist/index.js",
   "bin": {
