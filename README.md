@@ -73,6 +73,14 @@ npm start -- <directory> [options]
 
 ## 📝 Changelog
 
+### v1.0.2
+
+- **Added binary file detection**  
+  Files are now checked for binary content by scanning the first bytes. If binary data is detected, the file content display is skipped with a message: "Binary file not displayed."
+
+- **Updated documentation**  
+  README updated to reflect changes regarding handling of binary files.
+
 ### v1.0.1
 - Added `.git` to default ignore patterns
 - Improved documentation
