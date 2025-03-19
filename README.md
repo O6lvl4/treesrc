@@ -78,7 +78,9 @@ npm start -- <directory> [options]
 - Rewritten in TypeScript
 - npm published
 
+### v1.0.1
+- Added `.git` to default ignore patterns
+
 ## 📄 License
 
 [MIT License](LICENSE)
-

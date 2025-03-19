@@ -6,7 +6,7 @@ import ignore, { Ignore } from 'ignore';
 import { program } from 'commander';
 
 program
-  .version('1.0.0')
+  .version('1.0.1')
   .argument('<directory>', 'Target directory')
   .option('-i, --ignore <patterns...>', 'Extra ignore patterns')
   .parse(process.argv);
@@ -17,6 +17,8 @@ const targetDir = program.args[0];
 // 無視設定を取得（.gitignore + 任意の追加無視ファイル）
 function getIgnoreRules(ignoreFilePath: string, extraIgnores: string[] = []): Ignore {
   let ig = ignore();
+
+  ig.add('.git');
 
   if (fs.existsSync(ignoreFilePath)) {
     const gitignoreContent = fs.readFileSync(ignoreFilePath, 'utf8');
