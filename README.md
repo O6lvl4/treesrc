@@ -73,14 +73,19 @@ npm start -- <directory> [options]
 
 ## 📝 Changelog
 
+### v1.0.1
+- Added `.git` to default ignore patterns
+- Improved documentation
+
 ### v1.0.0
 - First stable release
 - Rewritten in TypeScript
 - npm published
 
-### v1.0.1
-- Added `.git` to default ignore patterns
-
 ## 📄 License
 
 [MIT License](LICENSE)
+
+---
+
+Made with ❤️ by [Your Name](https://github.com/O6lvl4).
