@@ -75,9 +75,10 @@ npm start -- <directory> [options]
 
 ### v1.0.3
 
-- **Added support for custom ignore patterns**  
-  You can now specify additional ignore patterns via CLI arguments.  
-  Example: `treesrc ./my-project -i '*.log' '*.tmp'`
+- **Improved binary file detection accuracy**
+  - Integrated `isbinaryfile` library for reliable binary detection.
+  - Added extra check to detect corrupted or binary-like text files based on control character frequency.
+  - Files with unreadable UTF-8 encoding are now automatically skipped.
 
 ### v1.0.2
 
