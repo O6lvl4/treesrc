@@ -1,0 +1,39 @@
+{
+  "name": "treesrc",
+  "version": "1.0.0",
+  "description": "A CLI tool written in TypeScript to display directory structure and file contents, respecting .gitignore rules.",
+  "main": "dist/index.js",
+  "bin": {
+    "treesrc": "dist/index.js"
+  },
+  "scripts": {
+    "start": "ts-node index.ts",
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "setup": "npm install && npm run build && npm link"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "commander": "^11.1.0",
+    "ignore": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2"
+  },
+  "keywords": [
+    "cli",
+    "tree",
+    "gitignore",
+    "typescript"
+  ],
+  "author": "Your Name <youremail@example.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/O6lvl4/treesrc.git"
+  }
+}
