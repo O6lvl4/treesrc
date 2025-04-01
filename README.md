@@ -1,4 +1,4 @@
-# 🌳 treesrc
+![](./docs/logo-treesrc.png)
 
 > A CLI tool written in TypeScript that displays directory structures and file contents, fully respecting `.gitignore` rules.
 
