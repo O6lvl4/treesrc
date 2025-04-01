@@ -1,4 +1,4 @@
-![](./docs/logo-treesrc.png)
+<img src="./docs/logo-treesrc.png" width="40%" min-width="200px">
 
 > A CLI tool written in TypeScript that displays directory structures and file contents, fully respecting `.gitignore` rules.
 
