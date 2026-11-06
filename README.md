@@ -1,20 +1,14 @@
 <img src="./docs/logo-treesrc.png" width="40%" min-width="200px">
 
-> A CLI tool written in TypeScript that displays directory structures and file contents, fully respecting `.gitignore` rules.
+> A CLI tool written in [Almide](https://github.com/almide/almide) that displays directory structures and file contents, fully respecting `.gitignore` rules. It works on any kind of file: it never parses the code it prints.
 
 ## 📦 Installation
 
-Install globally via npm:
-
 ```bash
-npm install -g treesrc
+almide install github.com/O6lvl4/treesrc   # one native binary → ~/.local/bin/treesrc
 ```
 
-or use it temporarily without installing:
-
-```bash
-npx treesrc <directory>
-```
+The npm package (`npm install -g treesrc`) still serves the last TypeScript release, v1.0.3.
 
 ## 🚀 Quick Usage
 
@@ -33,9 +27,11 @@ treesrc ./my-project -i '*.log' '*.tmp'
 ## 🎯 Features
 
 - Display directory structures as a neatly formatted tree
-- View the contents of each file in the directory
-- Automatically respects `.gitignore` rules
+- View the contents of each file in the directory, with line numbers
+- Respects `.gitignore` rules, including `.gitignore` files in subdirectories, `!` negation, `**` and `[...]` classes
 - Supports custom ignore patterns via CLI arguments
+- Skips binary files (a NUL byte in the first 8000 bytes, as git decides) and files that are not valid UTF-8
+- Lists a symlinked directory without following it
 
 ## 🛠️ CLI Options
 
@@ -53,25 +49,26 @@ Options:
 
 ## ⚙️ Development
 
-### Setup locally
-
-Clone the repository and install dependencies:
-
 ```bash
-git clone https://github.com/yourusername/treesrc.git
+git clone https://github.com/O6lvl4/treesrc.git
 cd treesrc
-npm install
-npm run build
-npm link
+almide test                 # unit tests (the .gitignore matcher, argument parsing, drawing)
+almide build                # → ./treesrc
+python3 ci/smoke.py         # runs the binary on a sample tree and compares the whole output
 ```
 
-### Run Locally
-
-```bash
-npm start -- <directory> [options]
-```
+- `src/gitignore.almd` — the `.gitignore` pattern matcher, pure and self-contained
+- `src/main.almd` — arguments, the directory walk and the output
 
 ## 📝 Changelog
+
+### v2.0.0
+
+- **Rewritten in Almide**; no runtime dependencies, one native binary
+- `.gitignore` files in subdirectories now apply to their own directory
+- The last visible entry of a directory is always drawn with `└──`, even when ignored entries follow it
+- A file that is not valid UTF-8 is skipped with "File encoding unreadable. Skipped." instead of printed with replacement characters
+- A missing directory is an error message and exit code 1
 
 ### v1.0.3
 

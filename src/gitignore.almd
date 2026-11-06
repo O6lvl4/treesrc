@@ -1,0 +1,233 @@
+// gitignore — .gitignore patterns as a pure matcher.
+//
+// Supported: `#` comments, blank lines, `!` negation, `\#` / `\!` escapes,
+// a trailing `/` (directories only), a leading or middle `/` (anchored to the
+// .gitignore's directory), `*`, `?`, `[abc]`, `[a-z]`, `[!abc]`, `\x`, and
+// `**` as a whole segment (`**/x`, `x/**`, `a/**/b`).
+//
+// The walker asks about every entry before it descends, so an excluded
+// directory hides everything under it, as in git.
+type Rule = { glob: List[String], negate: Bool, dir_only: Bool, anchored: Bool }
+
+// The rules of one .gitignore; `base` is its directory relative to the root ("" = root).
+type Scope = { base: String, rules: List[Rule] }
+
+fn parse(text: String) -> List[Rule] = string.split(text, "\n") |> list.filter_map((line) => parse_line(line))
+
+fn parse_line(raw: String) -> Rule? = {
+  let line = string.strip_suffix(raw, "\r") ?? raw
+  let trimmed = if string.ends_with(line, "\\ ") then line else string.trim_end(line)
+  if trimmed == "" or string.starts_with(trimmed, "#") then none
+  else {
+    let negate = string.starts_with(trimmed, "!")
+    let body = if negate then string.drop(trimmed, 1) else trimmed
+    let unescaped = if string.starts_with(body, "\\#") or string.starts_with(body, "\\!") then string.drop(
+      body,
+      1,
+    ) else body
+    let dir_only = string.ends_with(unescaped, "/")
+    let no_trail = if dir_only then string.drop_end(unescaped, 1) else unescaped
+    let anchored = string.contains(no_trail, "/")
+    let pattern = if string.starts_with(no_trail, "/") then string.drop(no_trail, 1) else no_trail
+    if pattern == "" then none
+    else some(Rule {
+      glob: string.split(pattern, "/"),
+      negate: negate,
+      dir_only: dir_only,
+      anchored: anchored,
+    })
+  }
+}
+
+// Does one rule match `rel` (a path relative to the rule's .gitignore directory)?
+fn matches(rule: Rule, rel: String, is_dir: Bool) -> Bool =
+  if rule.dir_only and not is_dir then false
+  else if rule.anchored then match_segments(rule.glob, 0, string.split(rel, "/"), 0)
+  else match list.first(rule.glob) {
+    some(p) => fnmatch(p, last_segment(rel)),
+    none => false,
+  }
+
+// The last matching rule decides; `start` is the verdict before these rules.
+fn verdict(rules: List[Rule], rel: String, is_dir: Bool, start: Bool) -> Bool = list.fold(
+  rules,
+  start,
+  (acc, rule) => if matches(rule, rel, is_dir) then not rule.negate
+  else acc,
+)
+
+// Shallow scopes first, deeper ones later, so a nested .gitignore overrides its parents.
+fn ignored(scopes: List[Scope], rel: String, is_dir: Bool) -> Bool = list.fold(
+  scopes,
+  false,
+  (acc, sc) => match relative_to(sc.base, rel) {
+    some(r) => verdict(sc.rules, r, is_dir, acc),
+    none => acc,
+  },
+)
+
+fn relative_to(base: String, rel: String) -> String? =
+  if base == "" then some(rel) else string.strip_prefix(rel, "${base}/")
+
+fn last_segment(path: String) -> String = match string.last_index_of(path, "/") {
+  some(i) => string.drop(path, i + 1),
+  none => path,
+}
+
+// ── `/`-separated segments; `**` spans zero or more of them ─────────────────
+// A trailing `x/**` matches what is inside x, not x itself.
+fn match_segments(pat: List[String], pi: Int, path: List[String], si: Int) -> Bool = match list.get(
+  pat,
+  pi,
+) {
+  none => si == list.len(path),
+  some(seg) => if seg == "**" then if pi == list.len(pat) - 1 then si < list.len(path)
+  else match_segments(pat, pi + 1, path, si) or (si < list.len(path) and match_segments(
+    pat,
+    pi,
+    path,
+    si + 1,
+  ))
+  else match list.get(path, si) {
+    some(name) => fnmatch(seg, name) and match_segments(pat, pi + 1, path, si + 1),
+    none => false,
+  },
+}
+
+// ── one segment: `*`, `?`, `[...]`, `\x` ────────────────────────────────────
+fn fnmatch(pattern: String, name: String) -> Bool = fm(
+  string.to_list(pattern),
+  0,
+  string.to_list(name),
+  0,
+)
+
+fn fm(p: List[String], pi: Int, n: List[String], ni: Int) -> Bool = match list.get(p, pi) {
+  none => ni == list.len(n),
+  some(c) => match c {
+    "*" => fm(p, pi + 1, n, ni) or (ni < list.len(n) and fm(p, pi, n, ni + 1)),
+    "?" => ni < list.len(n) and fm(p, pi + 1, n, ni + 1),
+    "[" => match class_end(p, pi) {
+      some(end) => match list.get(n, ni) {
+        some(ch) => class_hit(p, pi + 1, end, ch) and fm(p, end + 1, n, ni + 1),
+        none => false,
+      },
+      none => literal(p, pi, "[", n, ni),
+    },
+    "\\" => match list.get(p, pi + 1) {
+      some(esc) => list.get(n, ni) == some(esc) and fm(p, pi + 2, n, ni + 1),
+      none => false,
+    },
+    _ => literal(p, pi, c, n, ni),
+  },
+}
+
+fn literal(p: List[String], pi: Int, c: String, n: List[String], ni: Int) -> Bool = list.get(n, ni) == some(c) and fm(
+  p,
+  pi + 1,
+  n,
+  ni + 1,
+)
+
+// Index of the `]` closing the class opened at `open`; a `]` right after `[` or `[!` is literal.
+fn class_end(p: List[String], open: Int) -> Int? = {
+  let after_neg = if is_negation(list.get(p, open + 1)) then open + 2 else open + 1
+  let first = if list.get(p, after_neg) == some("]") then after_neg + 1 else after_neg
+  find_from(p, first, "]")
+}
+
+fn find_from(p: List[String], i: Int, target: String) -> Int? = match list.get(p, i) {
+  none => none,
+  some(c) => if c == target then some(i)
+  else find_from(p, i + 1, target),
+}
+
+fn is_negation(c: String?) -> Bool = c == some("!") or c == some("^")
+
+fn class_hit(p: List[String], lo: Int, hi: Int, ch: String) -> Bool = {
+  let neg = is_negation(list.get(p, lo))
+  let hit = in_class(p, if neg then lo + 1 else lo, hi, cp(ch))
+  if neg then not hit else hit
+}
+
+fn in_class(p: List[String], i: Int, hi: Int, x: Int) -> Bool =
+  if i >= hi then false
+  else if i + 2 < hi and list.get(p, i + 1) == some("-") then (cp_at(p, i) <= x and x <= cp_at(
+    p,
+    i + 2,
+  )) or in_class(p, i + 3, hi, x)
+  else cp_at(p, i) == x or in_class(p, i + 1, hi, x)
+
+fn cp(c: String) -> Int = string.to_codepoint(c) ?? -1
+
+fn cp_at(p: List[String], i: Int) -> Int = cp(list.get(p, i) ?? "")
+
+// ── tests ───────────────────────────────────────────────────────────────────
+fn hit(text: String, rel: String, is_dir: Bool) -> Bool = ignored(
+  [
+    Scope { base: "", rules: parse(text) }
+  ],
+  rel,
+  is_dir,
+)
+
+test "comments, blanks and plain names" {
+  assert_eq(list.len(parse("# c\n\n  \nfoo\n")), 1)
+  assert(hit("foo", "foo", false))
+  assert(hit("foo", "a/b/foo", false))
+  assert(not hit("foo", "foobar", false))
+}
+
+test "globs inside a segment" {
+  assert(hit("*.log", "x/debug.log", false))
+  assert(not hit("*.log", "debug.log.txt", false))
+  assert(hit("file?.txt", "file1.txt", false))
+  assert(not hit("file?.txt", "file10.txt", false))
+  assert(hit("[abc].md", "b.md", false))
+  assert(not hit("[abc].md", "d.md", false))
+  assert(hit("[a-c]x", "bx", false))
+  assert(hit("[!a-c]x", "dx", false))
+  assert(not hit("[!a-c]x", "ax", false))
+  assert(hit("\\#lit", "#lit", false))
+}
+
+test "directory-only and anchored rules" {
+  assert(hit("build/", "build", true))
+  assert(not hit("build/", "build", false))
+  assert(hit("/top", "top", false))
+  assert(not hit("/top", "a/top", false))
+  assert(hit("doc/*.txt", "doc/a.txt", false))
+  assert(not hit("doc/*.txt", "doc/x/a.txt", false))
+  assert(not hit("doc/*.txt", "x/doc/a.txt", false))
+}
+
+test "double star" {
+  assert(hit("**/logs", "logs", true))
+  assert(hit("**/logs", "a/b/logs", true))
+  assert(hit("a/**/b", "a/b", false))
+  assert(hit("a/**/b", "a/x/y/b", false))
+  assert(hit("a/**", "a/x", false))
+  assert(not hit("a/**", "a", true))
+}
+
+test "negation: the last match wins" {
+  assert(not hit("*.log\n!keep.log", "keep.log", false))
+  assert(hit("*.log\n!keep.log", "drop.log", false))
+  assert(hit("!keep.log\n*.log", "keep.log", false))
+}
+
+test "a nested scope overrides its parent, only under its base" {
+  let scopes = [
+    Scope { base: "", rules: parse("*.tmp") },
+    Scope { base: "sub", rules: parse("!keep.tmp\n/local") }
+  ]
+  assert(not ignored(scopes, "sub/keep.tmp", false))
+  assert(ignored(scopes, "keep.tmp", false))
+  assert(ignored(scopes, "sub/local", false))
+  assert(not ignored(scopes, "local", false))
+  assert(not ignored(scopes, "sub/x/local", false))
+}
+
+test "CRLF and trailing spaces" {
+  assert(hit("foo  \r\n", "foo", false))
+}
