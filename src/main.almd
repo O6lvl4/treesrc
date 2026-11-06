@@ -68,7 +68,10 @@ fn normalize_abs(abs: String) -> String = {
   "/" + list.join(parts, "/")
 }
 
-fn child_path(dir: String, rel: String) -> String = if rel == "" then dir else "${dir}/${rel}"
+// Either side may be "" (the root itself, or a top-level entry).
+fn child_path(dir: String, rel: String) -> String =
+  if rel == "" then dir
+  else if dir == "" then rel else "${dir}/${rel}"
 
 // ── the walk ────────────────────────────────────────────────────────────────
 type Kind =
@@ -218,6 +221,12 @@ test "arguments" {
     err(_) => true,
     ok(_) => false,
   })
+}
+
+test "child paths" {
+  assert_eq(child_path("", "a.txt"), "a.txt")
+  assert_eq(child_path("src", "a.txt"), "src/a.txt")
+  assert_eq(child_path("/root", ""), "/root")
 }
 
 test "normalize" {
