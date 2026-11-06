@@ -1,0 +1,248 @@
+// treesrc — print a directory as a tree, then every text file in it, numbered,
+// skipping what .gitignore (and -i patterns) exclude.
+//
+//   treesrc <directory> [-i <patterns...>]
+import fs
+import env
+import process
+import self.gitignore
+
+let VERSION = "2.0.0"
+
+fn usage() -> String = """Usage: treesrc <directory> [options]
+
+Arguments:
+  directory                   Target directory
+
+Options:
+  -i, --ignore <patterns...>  Additional ignore patterns
+  -V, --version               output the version number
+  -h, --help                  display help for command"""
+
+// ── arguments ───────────────────────────────────────────────────────────────
+type Options = { dir: String, ignores: List[String] }
+
+type Command =
+  | Run(Options)
+  | ShowVersion
+  | ShowHelp
+
+fn parse_args(args: List[String]) -> Result[Command, String] = parse_from(args, 0, none, [], false)
+
+// After -i, every following non-option argument is a pattern.
+fn parse_from(args: List[String], i: Int, dir: String?, ignores: List[String], in_ignore: Bool) -> Result[Command, String] = match list.get(
+  args,
+  i,
+) {
+  none => match dir {
+    some(d) => ok(Run(Options { dir: d, ignores: ignores })),
+    none => err("missing required argument 'directory'"),
+  },
+  some(a) => match a {
+    "-V" => ok(ShowVersion),
+    "--version" => ok(ShowVersion),
+    "-h" => ok(ShowHelp),
+    "--help" => ok(ShowHelp),
+    "-i" => parse_from(args, i + 1, dir, ignores, true),
+    "--ignore" => parse_from(args, i + 1, dir, ignores, true),
+    _ => if string.starts_with(a, "-") and a != "-" then err("unknown option '${a}'")
+    else if in_ignore then parse_from(args, i + 1, dir, ignores + [a], true)
+    else match dir {
+      none => parse_from(args, i + 1, some(a), ignores, false),
+      some(_) => err("too many arguments: '${a}'"),
+    },
+  },
+}
+
+// ── paths ───────────────────────────────────────────────────────────────────
+fn normalize_abs(abs: String) -> String = {
+  let parts = string.split(abs, "/") |> list.fold(
+    [],
+    (acc: List[String], seg) => match seg {
+      "" => acc,
+      "." => acc,
+      ".." => list.take(acc, list.len(acc) - 1),
+      _ => acc + [seg],
+    },
+  )
+  "/" + list.join(parts, "/")
+}
+
+// Either side may be "" (the root itself, or a top-level entry).
+fn child_path(dir: String, rel: String) -> String =
+  if rel == "" then dir
+  else if dir == "" then rel else "${dir}/${rel}"
+
+// ── the walk ────────────────────────────────────────────────────────────────
+type Kind =
+  | Directory
+  | RegularFile
+  | DirLink
+
+type Entry = { name: String, rel: String, kind: Kind, children: List[Entry] }
+
+effect fn read_rules(path: String) -> Result[List[gitignore.Rule], String] = gitignore.parse(fs.read_text_if_exists(path)! ?? "")
+
+// `scopes` holds the .gitignore files from the root down to `rel_dir`; `extra` is -i, applied last.
+effect fn scan(root: String, rel_dir: String, scopes: List[gitignore.Scope], extra: List[gitignore.Rule]) -> Result[List[Entry], String] = {
+  let abs_dir = child_path(root, rel_dir)
+  let here = if rel_dir == "" then scopes
+  else {
+    let rules = read_rules("${abs_dir}/.gitignore")!
+    if list.is_empty(rules) then scopes
+    else scopes + [
+      gitignore.Scope { base: rel_dir, rules: rules }
+    ]
+  }
+  let names = fs.list_dir(abs_dir) ?? []
+  names |> list.filter_map((name) => {
+    let rel = child_path(rel_dir, name)
+    let abs = "${root}/${rel}"
+    let is_dir = fs.is_dir(abs)
+    let skip = gitignore.verdict(extra, rel, is_dir, gitignore.ignored(here, rel, is_dir))
+    if skip then none
+    else if is_dir and fs.is_symlink(abs) then some(Entry {
+      name: name,
+      rel: rel,
+      kind: DirLink,
+      children: [],
+    })
+    else if is_dir then some(Entry {
+      name: name,
+      rel: rel,
+      kind: Directory,
+      children: scan(root, rel, here, extra)!,
+    })
+    else some(Entry { name: name, rel: rel, kind: RegularFile, children: [] })
+  })!
+}
+
+// ── output ──────────────────────────────────────────────────────────────────
+fn tree_lines(entries: List[Entry], prefix: String) -> List[String] = {
+  let last_i = list.len(entries) - 1
+  entries |> list.enumerate |> list.flat_map(((i, e)) => {
+    let last = i == last_i
+    let branch = if last then "└── " else "├── "
+    let next = if last then "${prefix}    " else "${prefix}│   "
+    [
+      "${prefix}${branch}${e.name}"
+    ] + tree_lines(e.children, next)
+  })
+}
+
+fn files_of(entries: List[Entry]) -> List[Entry] = entries |> list.flat_map((e) => match e.kind {
+  Directory => files_of(e.children),
+  RegularFile => [e],
+  DirLink => [],
+})
+
+// Git's rule: a NUL byte in the first 8000 bytes means binary.
+fn has_nul(b: Bytes, i: Int, end: Int) -> Bool =
+  if i >= end then false
+  else (bytes.get(b, i) ?? 1) == 0 or has_nul(b, i + 1, end)
+
+fn is_control(c: String) -> Bool = {
+  let n = string.to_codepoint(c) ?? 0
+  (n >= 0 and n <= 8) or (n >= 14 and n <= 31) or (n >= 127 and n <= 159)
+}
+
+fn numbered(content: String) -> String = string.split(content, "\n") |> list.enumerate |> list.map(((i, line)) => "${i + 1} | ${line}") |> list.join("\n")
+
+effect fn file_section(root: String, e: Entry) -> String = {
+  let header = "\n/${e.rel}:\n${string.repeat("-", 80)}"
+  let path = "${root}/${e.rel}"
+  let unreadable = "${header}\nFile encoding unreadable. Skipped.\n"
+  match fs.read_bytes(path) {
+    err(_) => unreadable,
+    ok(b) => if has_nul(b, 0, int.min(bytes.len(b), 8000)) then "${header}\nBinary file not displayed.\n"
+    else if not bytes.is_valid_utf8(b) then unreadable
+    else match fs.read_text(path) {
+      err(_) => unreadable,
+      ok(content) => {
+        let chars = string.to_list(content)
+        let controls = chars |> list.filter((c) => is_control(c)) |> list.len
+        if controls * 10 > list.len(chars) then "${header}\nBinary-like or corrupted text file not displayed.\n"
+        else "${header}\n${numbered(content)}\n"
+      },
+    },
+  }
+}
+
+effect fn run(opts: Options) -> Result[Unit, String] = {
+  let abs = if string.starts_with(opts.dir, "/") then opts.dir
+  else "${env.cwd()!}/${opts.dir}"
+  let root = normalize_abs(abs)
+  guard fs.is_dir(root) else err("not a directory: ${opts.dir}")
+  let root_rules = gitignore.parse(".git") + read_rules("${root}/.gitignore")!
+  let extra = gitignore.parse(list.join(opts.ignores, "\n"))
+  let entries = scan(root, "", [
+    gitignore.Scope { base: "", rules: root_rules }
+  ], extra)!
+  println(root)
+  for line in tree_lines(entries, "") {
+    println(line)
+  }
+  for e in files_of(entries) {
+    println(file_section(root, e)!)
+  }
+  ok(())
+}
+
+effect fn main() -> Unit = {
+  match parse_args(env.args()) {
+    ok(Run(opts)) => match run(opts) {
+      ok(_) => (),
+      err(e) => {
+        eprintln("treesrc: ${e}")
+        process.exit(1)
+      },
+    },
+    ok(ShowVersion) => println(VERSION),
+    ok(ShowHelp) => println(usage()),
+    err(e) => {
+      eprintln("error: ${e}\n\n${usage()}")
+      process.exit(1)
+    },
+  }
+}
+
+test "arguments" {
+  assert_eq(parse_args(["dir"]), ok(Run(Options { dir: "dir", ignores: [] })))
+  assert_eq(
+    parse_args(["dir", "-i", "*.log", "*.tmp"]),
+    ok(Run(Options { dir: "dir", ignores: ["*.log", "*.tmp"] })),
+  )
+  assert_eq(parse_args(["-V"]), ok(ShowVersion))
+  assert(match parse_args([]) {
+    err(_) => true,
+    ok(_) => false,
+  })
+  assert(match parse_args(["a", "b"]) {
+    err(_) => true,
+    ok(_) => false,
+  })
+}
+
+test "child paths" {
+  assert_eq(child_path("", "a.txt"), "a.txt")
+  assert_eq(child_path("src", "a.txt"), "src/a.txt")
+  assert_eq(child_path("/root", ""), "/root")
+}
+
+test "normalize" {
+  assert_eq(normalize_abs("/a/./b/../c/"), "/a/c")
+  assert_eq(normalize_abs("/"), "/")
+}
+
+test "tree drawing" {
+  let leaf = (n: String) => Entry { name: n, rel: n, kind: RegularFile, children: [] }
+  let tree = [
+    Entry { name: "src", rel: "src", kind: Directory, children: [leaf("a"), leaf("b")] },
+    leaf("z")
+  ]
+  assert_eq(tree_lines(tree, ""), ["├── src", "│   ├── a", "│   └── b", "└── z"])
+}
+
+test "numbered lines" {
+  assert_eq(numbered("x\ny"), "1 | x\n2 | y")
+}

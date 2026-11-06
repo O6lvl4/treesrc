@@ -1,0 +1,37 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_INCREMENTAL: 0
+      RUSTUP_TOOLCHAIN: 1.97.0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install the Almide v0.69.0 release
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/almide-linux-x86_64.tar.gz https://github.com/almide/almide/releases/download/v0.69.0/almide-linux-x86_64.tar.gz
+          curl -fsSL -o /tmp/almide.sha256 https://github.com/almide/almide/releases/download/v0.69.0/almide-checksums.sha256
+          (cd /tmp && grep ' almide-linux-x86_64.tar.gz$' almide.sha256 | sha256sum -c -)
+          mkdir -p .ci/almide/target/release
+          tar xzf /tmp/almide-linux-x86_64.tar.gz -C /tmp
+          install /tmp/almide-linux-x86_64/almide .ci/almide/target/release/almide
+          .ci/almide/target/release/almide --version
+      - run: rustup toolchain install 1.97.0 --profile minimal
+      - name: Tests, build and CLI smoke
+        env:
+          ALMIDE_BIN: ${{ github.workspace }}/.ci/almide/target/release/almide
+        run: bash ci/check.sh
